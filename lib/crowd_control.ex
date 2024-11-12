@@ -261,7 +261,7 @@ defmodule CrowdControl do
   # cleans abandoned rooms
   defp clean(table) do
     # :ets.fun2ms(fn {room, count} when count <= 0 -> room end)
-    ms = [{{:"$1", :"$2"}, [{:"=<", :"$2", 0}], [:"$1"]}]
+    ms = [{{:"$1", :"$2"}, [{:<=, :"$2", 0}], [:"$1"]}]
     :ets.select_delete(table, ms)
   end
 end

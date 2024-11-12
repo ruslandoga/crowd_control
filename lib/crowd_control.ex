@@ -47,7 +47,7 @@ defmodule CrowdControl do
         Enum.random(rooms)
 
       :"$end_of_table" ->
-        # tries to get any non-empty room (but and also non-full)
+        # tries to get any non-empty room (but and also half-full)
         # generated with `:ets.fun2ms(fn {room, count} when count > 0 and count < 50 -> room end)`
         ms = [{{:"$1", :"$2"}, [{:andalso, {:>, :"$2", 0}, {:<, :"$2", 50}}], [:"$1"]}]
 

@@ -50,10 +50,22 @@ end)
 
 finished_at = System.monotonic_time(:millisecond)
 
-rooms = Enum.sort_by(:ets.tab2list(CrowdControl), fn {_, count} -> count end, :desc)
+rooms = :ets.tab2list(CrowdControl)
 
 IO.puts(
   "processed #{users_count} joins across #{length(rooms)} rooms in #{finished_at - started_at}ms"
 )
 
-IO.inspect(Enum.take(rooms, 10), label: "top 10 rooms by user count")
+histogram =
+  Enum.group_by(
+    rooms,
+    fn {_, count} -> count end,
+    fn {room, _} -> room end
+  )
+  |> Enum.map(fn {count, rooms} -> {count, length(rooms)} end)
+  |> Enum.sort_by(fn {count, _} -> count end, :desc)
+
+histogram
+|> Enum.map(fn {count, rooms} -> "rooms with #{count} member(s): #{rooms}" end)
+|> Enum.join("\n")
+|> IO.puts()

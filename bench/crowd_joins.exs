@@ -7,7 +7,7 @@ children = [
 Supervisor.start_link(children, strategy: :one_for_one)
 
 parent = self()
-users_count = 10000
+users_count = 100_000
 
 started_at = System.monotonic_time(:millisecond)
 

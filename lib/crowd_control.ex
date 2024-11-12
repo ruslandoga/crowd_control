@@ -66,7 +66,7 @@ defmodule CrowdControl do
       :ok = Phoenix.PubSub.subscribe(pubsub, room_topic)
       {room_topic, monitor(counter, room_id)}
     else
-      find_and_join_room((room_id <<< 2) + :rand.uniform(2) - 1)
+      find_and_join_room((room_id <<< 2) + :rand.uniform(4) - 1)
     end
   end
 

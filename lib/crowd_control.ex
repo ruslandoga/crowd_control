@@ -48,8 +48,8 @@ defmodule CrowdControl do
 
       :"$end_of_table" ->
         # tries to get any non-empty room (but and also non-full)
-        # generated with `:ets.fun2ms(fn {room, count} when count > 0 and count < 100 -> room end)`
-        ms = [{{:"$1", :"$2"}, [{:andalso, {:>, :"$2", 0}, {:<, :"$2", 100}}], [:"$1"]}]
+        # generated with `:ets.fun2ms(fn {room, count} when count > 0 and count < 50 -> room end)`
+        ms = [{{:"$1", :"$2"}, [{:andalso, {:>, :"$2", 0}, {:<, :"$2", 50}}], [:"$1"]}]
 
         case :ets.select(counter, ms, limit) do
           {[room], _continuation} -> room
@@ -125,7 +125,7 @@ defmodule CrowdControl do
   """
   @spec attempt_join(counter, Phoenix.PubSub.t(), String.t()) :: {:ok, reference} | :we_are_full
   def attempt_join(counter \\ @default_counter, pubsub \\ @default_pubsub, room) do
-    count = :ets.update_counter(counter, room, {2, 1}, {room, 0})
+    count = :ets.update_counter(counter, room, {2, 1, 100, 100}, {room, 0})
 
     if count < 100 do
       :ok = Phoenix.PubSub.subscribe(pubsub, room)

@@ -40,11 +40,11 @@ defmodule CrowdControl do
     # matches rooms with count between 15 and 100
     # generated with `:ets.fun2ms(fn {room, count} when count > 15 and count < 100 -> room end)`
     ms = [{{:"$1", :"$2"}, [{:andalso, {:>, :"$2", 15}, {:<, :"$2", 100}}], [:"$1"]}]
-    limit = 1
+    limit = 5
 
     case :ets.select(counter, ms, limit) do
-      {[room], _continuation} ->
-        room
+      {rooms, _continuation} ->
+        Enum.random(rooms)
 
       :"$end_of_table" ->
         # tries to get any non-empty room (but and also non-full)
@@ -52,7 +52,7 @@ defmodule CrowdControl do
         ms = [{{:"$1", :"$2"}, [{:andalso, {:>, :"$2", 0}, {:<, :"$2", 50}}], [:"$1"]}]
 
         case :ets.select(counter, ms, limit) do
-          {[room], _continuation} -> room
+          {rooms, _continuation} -> Enum.random(rooms)
           :"$end_of_table" -> nil
         end
     end

@@ -49,8 +49,11 @@ Enum.each(1..users_count, fn _ ->
 end)
 
 finished_at = System.monotonic_time(:millisecond)
-IO.puts("processed #{users_count} joins in #{finished_at - started_at}ms")
 
-:ets.tab2list(CrowdControl)
-|> Enum.sort_by(fn {_, count} -> count end, :desc)
-|> IO.inspect(label: "room counters")
+rooms = Enum.sort_by(:ets.tab2list(CrowdControl), fn {_, count} -> count end, :desc)
+
+IO.puts(
+  "processed #{users_count} joins across #{length(rooms)} rooms in #{finished_at - started_at}ms"
+)
+
+IO.inspect(Enum.take(rooms, 10), label: "top 10 rooms by user count")

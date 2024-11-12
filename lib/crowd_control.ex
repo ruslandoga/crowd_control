@@ -14,7 +14,7 @@ defmodule CrowdControl do
           GenServer.option()
           # phoenix pubsub to use for message broadcasting
           | {:pubsub, Phoenix.PubSub.t()}
-          # how often to clean abandomed rooms
+          # how often to clean abandoned rooms
           | {:cleanup_period, timeout}
 
   @spec start_link([start_option]) :: GenServer.on_start()
@@ -98,7 +98,7 @@ defmodule CrowdControl do
   end
 
   @doc """
-  Attempts to join a room. On success, subcribes the process to the room.
+  Attempts to join a room. On success, subscribes the process to the room.
 
   Once the caller process exits (e.g. if the caller process is a Phoenix Channel, it would exit on user disconnect),
   the room counter is automatically decremented.
@@ -136,7 +136,7 @@ defmodule CrowdControl do
   end
 
   @doc """
-  Explicitely leaves a room.
+  Explicitly leaves a room.
 
   If the room is below 15 people, broadcasts a `{CrowdControl, :please_move}` message asking everyone else (in that room) to move.
 
@@ -157,7 +157,7 @@ defmodule CrowdControl do
         new_room = CrowdControl.find_or_start_room()
 
         if new_room == prev_room do
-          # didn't move to a new room, probably because it's the only non-empty room availible right now,
+          # didn't move to a new room, probably because it's the only non-empty room available right now,
           # and so we stay, we'll try again once someone else leaves
           socket
         else

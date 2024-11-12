@@ -30,48 +30,44 @@ defmodule CrowdControl do
     GenServer.start_link(__MODULE__, opts, gen_opts)
   end
 
-  @spec find_or_start_room() :: String.t()
-  def find_or_start_room do
-    find_room() || start_room()
+  defp room_topic(room_id) do
+    room32 =
+      room_id
+      |> :binary.encode_unsigned()
+      |> Base.encode32(case: :lower, padding: false)
+
+    "room:" <> room32
   end
 
-  @spec find_room(counter) :: String.t() | nil
-  def find_room(counter \\ @default_counter) do
-    # matches rooms with count between 15 and 100
-    # generated with `:ets.fun2ms(fn {room, count} when count > 15 and count < 100 -> room end)`
-    ms = [{{:"$1", :"$2"}, [{:andalso, {:>, :"$2", 15}, {:<, :"$2", 100}}], [:"$1"]}]
-    limit = 5
+  defp room_id("room:" <> room_topic) do
+    room_topic
+    |> Base.decode32!(case: :lower, padding: false)
+    |> :binary.decode_unsigned()
+  end
 
-    case :ets.select(counter, ms, limit) do
-      {rooms, _continuation} ->
-        Enum.random(rooms)
-
-      :"$end_of_table" ->
-        # tries to get any non-empty room (but and also half-full)
-        # generated with `:ets.fun2ms(fn {room, count} when count > 0 and count < 50 -> room end)`
-        ms = [{{:"$1", :"$2"}, [{:andalso, {:>, :"$2", 0}, {:<, :"$2", 50}}], [:"$1"]}]
-
-        case :ets.select(counter, ms, limit) do
-          {rooms, _continuation} -> Enum.random(rooms)
-          :"$end_of_table" -> nil
-        end
+  def room_counter(counter \\ @default_counter, room) do
+    case :ets.lookup(counter, room_id(room)) do
+      [{_, count}] -> count
+      [] -> 0
     end
   end
 
-  @spec start_room :: String.t()
-  def start_room do
-    id =
-      Base.hex_encode32(
-        <<
-          System.system_time(:second)::32,
-          :erlang.phash2({node(), self()}, 65536)::16,
-          :erlang.unique_integer()::16
-        >>,
-        case: :lower,
-        padding: false
-      )
+  import Bitwise
 
-    "room:#{id}"
+  @spec find_and_join_room :: {String.t(), reference}
+  def find_and_join_room, do: find_and_join_room(_start_at = 0b1)
+
+  @spec find_and_join_room(counter, Phoenix.PubSub.t(), pos_integer) :: {String.t(), reference}
+  def find_and_join_room(counter \\ @default_counter, pubsub \\ @default_pubsub, room_id) do
+    count = :ets.update_counter(counter, room_id, {2, 1, 100, 100}, {room_id, 0})
+
+    if count < 100 do
+      room_topic = room_topic(room_id)
+      :ok = Phoenix.PubSub.subscribe(pubsub, room_topic)
+      {room_topic, monitor(counter, room_id)}
+    else
+      find_and_join_room((room_id <<< 2) + :rand.uniform(4) - 1)
+    end
   end
 
   @doc """
@@ -97,94 +93,11 @@ defmodule CrowdControl do
     Phoenix.PubSub.broadcast_from!(pubsub, self(), room, broadcast)
   end
 
-  @doc """
-  Attempts to join a room. On success, subscribes the process to the room.
-
-  Once the caller process exits (e.g. if the caller process is a Phoenix Channel, it would exit on user disconnect),
-  the room counter is automatically decremented.
-
-  Example usage:
-
-      defp find_and_join_room(socket) do
-        room = CrowdControl.find_or_start_room()
-
-        case CrowdControl.attempt_join(room) do
-          {:ok, join_ref} ->
-            push(socket, "room:joined", %{room: room})
-            assign(socket, room: room, join_ref: join_ref)
-
-          :we_are_full ->
-            find_and_join_room(socket)
-        end
-      end
-
-      def handle_info(:after_join, socket) do
-        {:noreply, find_and_join_room(socket)}
-      end
-
-  """
-  @spec attempt_join(counter, Phoenix.PubSub.t(), String.t()) :: {:ok, reference} | :we_are_full
-  def attempt_join(counter \\ @default_counter, pubsub \\ @default_pubsub, room) do
-    count = :ets.update_counter(counter, room, {2, 1, 100, 100}, {room, 0})
-
-    if count < 100 do
-      :ok = Phoenix.PubSub.subscribe(pubsub, room)
-      {:ok, monitor(counter, room)}
-    else
-      :we_are_full
-    end
-  end
-
-  @doc """
-  Explicitly leaves a room.
-
-  If the room is below 15 people, broadcasts a `{CrowdControl, :please_move}` message asking everyone else (in that room) to move.
-
-  Example usage:
-
-      defp leave_room(socket) do
-        %{room: room, join_ref: join_ref} = socket.assigns
-        CrowdControl.leave_room(room, join_ref)
-        assign(socket, room: nil, join_ref: nil)
-      end
-
-      def handle_in("leave_room", _params, socket) do
-        {:noreply, leave_room(socket)}
-      end
-
-      defp try_move_room(socket) do
-        %{room: prev_room, join_ref: prev_join_ref} = socket.assigns
-        new_room = CrowdControl.find_or_start_room()
-
-        if new_room == prev_room do
-          # didn't move to a new room, probably because it's the only non-empty room available right now,
-          # and so we stay, we'll try again once someone else leaves
-          socket
-        else
-          case CrowdControl.attempt_join(new_room) do
-            {:ok, new_join_ref} ->
-              # moved to a new room, note that this leave would trigger another `:please_move` broadcast
-              # but that's ok, this way we make sure that everyone eventually moves out
-              CrowdControl.leave_room(prev_room, prev_join_ref)
-              push(socket, "room:moved", %{room: new_room})
-              assign(socket, room: new_room, join_ref: new_join_ref)
-
-            :we_are_full ->
-              try_move_room(socket)
-          end
-        end
-      end
-
-      def handle_info({CrowdControl, :please_move}, socket) do
-        {:noreply, try_move_room(socket)}
-      end
-
-  """
   @spec leave_room(counter, Phoenix.PubSub.t(), String.t(), reference) :: :ok
   def leave_room(counter \\ @default_counter, pubsub \\ @default_pubsub, room, join_ref) do
     demonitor(counter, join_ref)
     :ok = Phoenix.PubSub.unsubscribe(pubsub, room)
-    count = :ets.update_counter(counter, room, {2, -1})
+    count = :ets.update_counter(counter, room_id(room), {2, -1})
 
     if count < 15 do
       Phoenix.PubSub.broadcast!(pubsub, room, {CrowdControl, :please_move})
@@ -193,9 +106,9 @@ defmodule CrowdControl do
     :ok
   end
 
-  @spec monitor(counter, String.t()) :: reference
-  defp monitor(counter, room) do
-    GenServer.call(counter, {:monitor, self(), room})
+  @spec monitor(counter, pos_integer) :: reference
+  defp monitor(counter, room_id) do
+    GenServer.call(counter, {:monitor, self(), room_id})
   end
 
   @spec demonitor(counter, reference) :: :ok
@@ -224,8 +137,8 @@ defmodule CrowdControl do
   end
 
   @impl true
-  def handle_call({:monitor, pid, room}, _from, state) do
-    {:reply, Process.monitor(pid, tag: {:DOWN, room}), state}
+  def handle_call({:monitor, pid, room_id}, _from, state) do
+    {:reply, Process.monitor(pid, tag: {:DOWN, room_id}), state}
   end
 
   @impl true
@@ -241,14 +154,14 @@ defmodule CrowdControl do
     {:noreply, state}
   end
 
-  def handle_info({{:DOWN, room}, ref, :process, _pid, _reason}, state) do
+  def handle_info({{:DOWN, room_id}, ref, :process, _pid, _reason}, state) do
     %{table: table, pubsub: pubsub} = state
 
     Process.demonitor(ref, [:flush])
-    count = :ets.update_counter(table, room, {2, -1})
+    count = :ets.update_counter(table, room_id, {2, -1})
 
     if count < 15 do
-      Phoenix.PubSub.broadcast!(pubsub, room, {CrowdControl, :please_move})
+      Phoenix.PubSub.broadcast!(pubsub, room_topic(room_id), {CrowdControl, :please_move})
     end
 
     {:noreply, state}
